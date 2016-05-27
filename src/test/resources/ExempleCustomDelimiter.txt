@@ -1,0 +1,3 @@
+PERF|line1
+PERF|line2
+line3
