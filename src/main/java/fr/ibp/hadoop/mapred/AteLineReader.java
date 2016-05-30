@@ -152,11 +152,13 @@ public class AteLineReader {
 	 *             if the underlying stream throws
 	 */
 	public int readLine(Text str, int maxLineLength, int maxBytesToConsume) throws IOException {
-		if (this.recordDelimiterBytes != null) {
-			return readCustomLine(str, maxLineLength, maxBytesToConsume);
-		} else {
-			return readDefaultLine(str, maxLineLength, maxBytesToConsume);
-		}
+		
+			return readAteLine(str, maxLineLength, maxBytesToConsume);
+//		if (this.recordDelimiterBytes != null) {
+//			return readCustomLine(str, maxLineLength, maxBytesToConsume);
+//		} else {
+//			return readDefaultLine(str, maxLineLength, maxBytesToConsume);
+//		}
 	}
 
 	protected int fillBuffer(InputStream in, byte[] buffer, boolean inDelimiter) throws IOException {
@@ -285,7 +287,7 @@ public class AteLineReader {
 		 */
 		str.clear();
 		int txtLength = 0; // tracks str.getLength(), as an optimization
-		long bytesConsumed = 0;
+		long bytesConsumed = 0; // Line size delimiter included
 		int delPosn = 0;
 		int ambiguousByteCount = 0; // To capture the ambiguous characters count
 		do {
@@ -340,6 +342,118 @@ public class AteLineReader {
 		return (int) bytesConsumed;
 	}
 
+	/**
+	 * Read a line terminated by a custom delimiter (last 3 chars in deleimiter are part of next line data
+	 */
+	private int readAteLine(Text str, int maxLineLength, int maxBytesToConsume) throws IOException {
+		/*
+		 * We're reading data from inputStream, but the head of the stream may
+		 * be already captured in the previous buffer, so we have several cases:
+		 * 
+		 * 1. The buffer tail does not contain any character sequence which
+		 * matches with the head of delimiter. We count it as a ambiguous byte
+		 * count = 0 ie buffer does not stop in the middle of delimiter
+		 * 
+		 * 2. The buffer tail contains a X number of characters, that forms a
+		 * sequence, which matches with the head of delimiter. We count
+		 * ambiguous byte count = X ie the buffer stops on the Xth char of the limiter
+		 * 
+		 * // *** eg: A segment of input file is as follows
+		 * 
+		 * " record 1792: I found this bug very interesting and I have
+		 * completely read about it. record 1793: This bug can be solved easily
+		 * record 1794: This ."
+		 * 
+		 * delimiter = "record";
+		 * 
+		 * supposing:- String at the end of buffer =
+		 * "I found this bug very interesting and I have completely re" There
+		 * for next buffer = "ad about it. record 179       ...."
+		 * 
+		 * The matching characters in the input buffer tail and delimiter head =
+		 * "re" Therefore, ambiguous byte count = 2 **** //
+		 * 
+		 * 2.1 If the following bytes are the remaining characters of the
+		 * delimiter, then we have to capture only up to the starting position
+		 * of delimiter. That means, we need not include the ambiguous
+		 * characters in str plus 3 for ATE because it's data !
+		 * 
+		 * 2.2 If the following bytes are not the remaining characters of the
+		 * delimiter ( as mentioned in the example ), then we have to include
+		 * the ambiguous characters in str.
+		 */
+		str.clear(); // Stores read data for a line - init empty
+		int txtLength = 0; // tracks str.getLength(), as an optimization
+		long bytesConsumed = 0; // Line size delimiter included
+		int delPosn = 0; // Stores pointer on delimiter
+		int ambiguousByteCount = 0; // To capture the ambiguous characters count
+		do {
+			int startPosn = bufferPosn; // Start from previous end position
+			
+			// Deal with buffer filling
+			if (bufferPosn >= bufferLength) {
+				// Need to refill buffer
+				startPosn = bufferPosn = 0;
+				bufferLength = fillBuffer(in, buffer, ambiguousByteCount > 0);
+				if (bufferLength <= 0) {
+					// End of input stream - complete data with ambiguous bytes from delimiter head because we are obviously not on a line ending
+					str.append(recordDelimiterBytes, 0, ambiguousByteCount);
+					break; // EOF
+				}
+			}
+			
+			// Read buffer byte by byte
+			for (; bufferPosn < bufferLength; ++bufferPosn) {
+				// Test if on delimiter
+				if (buffer[bufferPosn] == recordDelimiterBytes[delPosn]) {
+					// On delimiter - increment delimiter pointer
+					delPosn++;
+					if (delPosn >= recordDelimiterBytes.length) {
+						// End of line
+						bufferPosn++;
+						
+						break;
+					}
+				} else if (delPosn != 0) {
+					// No more ambiguity - not on delimiter - reset delimiter pointer
+					bufferPosn--;
+					delPosn = 0;
+				}
+			}
+			int readLength = bufferPosn - startPosn;
+			bytesConsumed += readLength;
+			int appendLength = readLength - delPosn; // Do not append ATE at the end of the line
+			if (appendLength > maxLineLength - txtLength) {
+				appendLength = maxLineLength - txtLength;
+			}
+			if (appendLength > 0) {
+				if (ambiguousByteCount > 0) {
+					str.append(recordDelimiterBytes, 0, ambiguousByteCount);
+					// appending the ambiguous characters (refer case 2.2)
+					bytesConsumed += ambiguousByteCount;
+					ambiguousByteCount = 0;
+				}
+				str.append(buffer, startPosn, appendLength);
+				txtLength += appendLength;
+			}
+			
+			// Test if end of buffer
+			if (bufferPosn >= bufferLength) {
+				// Test if on delimiter
+				if (delPosn > 0 && delPosn < recordDelimiterBytes.length) {
+					ambiguousByteCount = delPosn;
+					bytesConsumed -= ambiguousByteCount; // to be consumed in
+															// next
+				}
+			}
+		} while (delPosn < recordDelimiterBytes.length && bytesConsumed < maxBytesToConsume);
+		if (bytesConsumed > Integer.MAX_VALUE) {
+			throw new IOException("Too many bytes before delimiter: " + bytesConsumed);
+		}
+		bufferPosn = bufferPosn - 4;
+		return (int) bytesConsumed;
+	}	
+	
 	/**
 	 * Read from the InputStream into the given Text.
 	 * 

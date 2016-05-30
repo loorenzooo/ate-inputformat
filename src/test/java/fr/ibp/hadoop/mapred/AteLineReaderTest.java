@@ -34,7 +34,8 @@ public class AteLineReaderTest {
 	public void readLineCustomDelimiterTest() throws IOException{
 		InputStream in = this.getClass().getClassLoader().getResourceAsStream("ExempleCustomDelimiter.txt");
 		//byte[] delimiter = new byte[] {1, 1, 2, 3, 5, 8};
-		byte[] delimiter = "\r\nPERF".getBytes();
+		// \r\n
+		byte[] delimiter = "\nPERF".getBytes();
 		ateLineReader = new AteLineReader(in,delimiter);
 		Text text = new Text();
 		int i = 0;
@@ -45,5 +46,21 @@ public class AteLineReaderTest {
 		Assert.assertTrue(ligne1 > 0);
 	}
 	
+	@Test
+	public void readLineAteTest() throws IOException{
+		InputStream in = this.getClass().getClassLoader().getResourceAsStream("ExempleCustomDelimiter.txt");
+		//byte[] delimiter = new byte[] {1, 1, 2, 3, 5, 8};
+		// \r\n
+		byte[] delimiter = "\nPERF".getBytes();
+		ateLineReader = new AteLineReader(in,delimiter);
+		Text text = new Text();
+		int i = 0;
+		int ligne1 = ateLineReader.readLine(text);
+		logger.info("Ligne 1 - longeur : {} - texte : {}", ligne1, text);
+		int ligne2 = ateLineReader.readLine(text);
+		logger.info("Ligne 2 - longeur : {} - texte : {}", ligne2, text);
+		Assert.assertTrue(ligne1 > 0);
+	}
 
+	
 }
